@@ -170,7 +170,7 @@ class LLMOchestrator():
         epochs_tensor = torch.linspace(1, num_epochs, len(train_losses))
         utils.plot_losses(epochs_tensor, tokens_seen, train_losses, val_losses)
         
-    def create_spamdata_dataloader(self, train_file_path, val_file_path, test_file_path, batch_size=8, shuffle=True, drop_last=True, num_workers=0):
+    def create_spamdata_dataloader(self, train_file_path, val_file_path, test_file_path, batch_size=8, shuffle=False, drop_last=True, num_workers=0):
         
         train_loader = data_loaders.create_spamdata_dataloader(
         file_path=train_file_path,
@@ -265,7 +265,8 @@ class LLMOchestrator():
                                                  device=self.device,
                                                  num_batches=num_batches)
 
-
-
+    def get_total_params(self):
+        total_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)
+        return total_params
 
     

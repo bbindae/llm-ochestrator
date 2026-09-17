@@ -84,7 +84,7 @@ class SpamDataset(Dataset):
         # return max(len(encoded_text) for encoded_text in self.encoded_texts)
     
 
-def create_spamdata_dataloader(file_path, tokenizer, batch_size=8, shuffle=True, num_workers=0, drop_last=True):
+def create_spamdata_dataloader(file_path, tokenizer, batch_size=8, shuffle=False, num_workers=0, drop_last=True):
 
         dataset = SpamDataset(
             csv_file=file_path,
