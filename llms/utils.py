@@ -4,6 +4,7 @@ import numpy as np
 import torch.nn as nn
 import matplotlib.pyplot as plt
 from matplotlib.ticker import MaxNLocator
+import math
 
 
 def get_device():
@@ -198,11 +199,19 @@ def generate_and_print_sample(model, tokenizer, device, start_context):
     print(decoded_text.replace("\n", " "))  # Compact print format
     model.train()
     
-def train_model_simple(model, train_loader, val_loader, optimizer, device, num_epochs,
-                       eval_freq, eval_iter, start_context, tokenizer):
+def train_model(model, train_loader, val_loader, optimizer, device, num_epochs,
+                       eval_freq, eval_iter, start_context, tokenizer,
+                       warmup_steps_ratio=0.2, initial_lr=3e-05, min_lr=1e-6):
     # Initialize lists to track losses and tokens seen
-    train_losses, val_losses, track_tokens_seen = [], [], []
+    train_losses, val_losses, track_tokens_seen, track_lrs = [], [], [], []
     tokens_seen, global_step = 0, -1
+
+    # Retrieve the maximum learning rate
+    peak_lr = optimizer.param_groups[0]["lr"]
+
+    total_training_steps = len(train_loader) * num_epochs
+    warmup_steps = int(warmup_steps_ratio * total_training_steps)
+    lr_increment = (peak_lr - initial_lr) / warmup_steps
 
     # Main training loop
     for epoch in range(num_epochs):
@@ -210,11 +219,33 @@ def train_model_simple(model, train_loader, val_loader, optimizer, device, num_e
         
         for input_batch, target_batch in train_loader:
             optimizer.zero_grad() # Reset loss gradients from previous batch iteration
+            global_step += 1
+
+            # Adjust the learning rate based on the current phase (warmup or cosine annealing)
+            if global_step < warmup_steps:
+                # Warmup
+                lr = initial_lr + (global_step * lr_increment)
+            else:
+                # Cosine annealing
+                progress = ((global_step - warmup_steps) /
+                            (total_training_steps - warmup_steps))
+                lr = min_lr + (peak_lr - min_lr) * 0.5 * (1 + math.cos(math.pi * progress))
+
+            # Apply the calculated learning rate to the optimizer
+            for param_group in optimizer.param_groups:
+                param_group["lr"] = lr
+            track_lrs.append(lr) # Store the current learning rate
+
+            # Calculate the backpropagate the loss
             loss = calc_loss_batch(input_batch, target_batch, model, device)
             loss.backward() # Calculate loss gradients
+
+            if global_step >= warmup_steps:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
             optimizer.step() # Update model weights using loss gradients
             tokens_seen += input_batch.numel()
-            global_step += 1
+            
 
             # Optional evaluation step
             if global_step % eval_freq == 0:
@@ -231,23 +262,23 @@ def train_model_simple(model, train_loader, val_loader, optimizer, device, num_e
             model, tokenizer, device, start_context
         )
 
-    return train_losses, val_losses, track_tokens_seen
+    return train_losses, val_losses, track_tokens_seen, track_lrs
 
-def plot_losses(epochs_seen, tokens_seen, train_losses, val_losses):
+def plot_losses(epochs_seen, tokens_seen, train_losses, val_losses, label="loss"):
     fig, ax1 = plt.subplots(figsize=(5, 3))
 
     # Plot training and validation loss against epochs
     ax1.plot(epochs_seen, train_losses, label="Training loss")
-    ax1.plot(epochs_seen, val_losses, linestyle="-.", label="Validation loss")
+    ax1.plot(epochs_seen, val_losses, linestyle="-.", label=f"Validation {label}")
     ax1.set_xlabel("Epochs")
-    ax1.set_ylabel("Loss")
+    ax1.set_ylabel(label.capitalize())
     ax1.legend(loc="upper right")
     ax1.xaxis.set_major_locator(MaxNLocator(integer=True))  # only show integer labels on x-axis
 
     # Create a second x-axis for tokens seen
     ax2 = ax1.twiny()  # Create a second x-axis that shares the same y-axis
     ax2.plot(tokens_seen, train_losses, alpha=0)  # Invisible plot for aligning ticks
-    ax2.set_xlabel("Tokens seen")
+    ax2.set_xlabel("Seen")
 
     fig.tight_layout()  # Adjust layout to make room
     #plt.savefig("loss-plot.pdf")

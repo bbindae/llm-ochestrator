@@ -153,3 +153,42 @@ class LoRALayer(torch.nn.Module):
 
     def forward(self, x):
         x = (self.alpha / self.rank) * (x @ self.A @ self.B)
+
+class GPTClassificationModel(nn.Module):
+    def __init__(self, cfg, num_classes=2):
+            super().__init__()
+            self.tok_emb = nn.Embedding(cfg["vocab_size"], cfg["emb_dim"])
+            self.pos_emb = nn.Embedding(cfg["context_length"], cfg["emb_dim"])
+            self.drop_emb = nn.Dropout(cfg["drop_rate"])
+
+            self.trf_blocks = nn.Sequential(
+                *[TransformerBlock(cfg) for _ in range(cfg["n_layers"])]
+            )
+            
+            self.final_norm = LayerNorm(cfg["emb_dim"])
+
+            torch.manual_seed(123)
+            self.out_head = nn.Linear(cfg["emb_dim"], num_classes)
+            
+            for param in self.parameters():
+                param.requires_grad = False
+
+            for param in self.trf_blocks[-1].parameters():
+                param.requires_grad = True
+
+            for param in self.final_norm.parameters():
+                param.requires_grad = True
+
+    def forward(self, in_idx):
+        batch_size, seq_len = in_idx.shape
+        tok_embeds = self.tok_emb(in_idx)
+        pos_embeds = self.pos_emb(
+            torch.arange(seq_len, device=in_idx.device)
+        )
+
+        x = tok_embeds + pos_embeds
+        x = self.drop_emb(x)
+        x = self.trf_blocks(x)
+        x = self.final_norm(x)
+        logits = self.out_head(x)
+        return logits
